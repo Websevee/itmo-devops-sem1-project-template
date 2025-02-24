@@ -108,68 +108,89 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	// Создаем временный CSV-файл
-	file, err := os.CreateTemp("", "data-*.csv")
+	tempCsvFile, err := os.CreateTemp("", "data-*.csv")
 	if err != nil {
-		http.Error(w, "Unable to create csv file", http.StatusInternalServerError)
+		http.Error(w, "Unable to create CSV file", http.StatusInternalServerError)
 		return
 	}
-	defer os.Remove(file.Name()) // Удаляем временный файл после использования
-	defer file.Close()
+	defer os.Remove(tempCsvFile.Name())
+	defer tempCsvFile.Close()
 
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
+	csvWriter := csv.NewWriter(tempCsvFile)
 
-	// Записываем заголовок
+	// Write the CSV header
 	header := []string{"id", "create_date", "name", "category", "price"}
-	if err := writer.Write(header); err != nil {
+	if err := csvWriter.Write(header); err != nil {
 		http.Error(w, "Unable to write header to CSV", http.StatusInternalServerError)
 		return
 	}
 
+	// Write data to CSV
 	for rows.Next() {
 		var id int
-		var create_date, name, category string
+		var createDate, name, category string
 		var price float64
-		err = rows.Scan(&id, &create_date, &name, &category, &price)
-		if err != nil {
+		if err := rows.Scan(&id, &createDate, &name, &category, &price); err != nil {
 			http.Error(w, "Unable to scan row", http.StatusInternalServerError)
 			return
 		}
-		writer.Write([]string{strconv.Itoa(id), create_date, name, category, fmt.Sprintf("%.2f", price)})
+		if err := csvWriter.Write([]string{strconv.Itoa(id), createDate, name, category, fmt.Sprintf("%.2f", price)}); err != nil {
+			http.Error(w, "Unable to write row to CSV", http.StatusInternalServerError)
+			return
+		}
 	}
 
-	if err := writer.Error(); err != nil {
+	// Check for errors during writing
+	if err := csvWriter.Error(); err != nil {
 		http.Error(w, "Error writing CSV data", http.StatusInternalServerError)
 		return
 	}
 
-	// Создаем временный ZIP-файл
+	// Flush the CSV writer to ensure all data is written to the file
+	csvWriter.Flush()
+	if err := csvWriter.Error(); err != nil {
+		http.Error(w, "Error flushing CSV data", http.StatusInternalServerError)
+		return
+	}
+
+	// Reset the file pointer to the beginning
+	if _, err := tempCsvFile.Seek(0, 0); err != nil {
+		http.Error(w, "Unable to reset file pointer", http.StatusInternalServerError)
+		return
+	}
+
+	// Create a temporary ZIP file
 	zipFile, err := os.CreateTemp("", "data-*.zip")
 	if err != nil {
 		http.Error(w, "Unable to create zip file", http.StatusInternalServerError)
 		return
 	}
-	defer os.Remove(zipFile.Name()) // Удаляем временный файл после использования
+	defer os.Remove(zipFile.Name()) // Remove the temporary file after use
 	defer zipFile.Close()
 
 	zipWriter := zip.NewWriter(zipFile)
 	defer zipWriter.Close()
 
+	// Create a file inside the ZIP archive
 	dataFile, err := zipWriter.Create("data.csv")
 	if err != nil {
 		http.Error(w, "Unable to create file in zip archive", http.StatusInternalServerError)
 		return
 	}
 
-	// Перемещаем указатель файла CSV в начало
-	file.Seek(0, 0)
-	if _, err := io.Copy(dataFile, file); err != nil {
+	// Copy data from the CSV file to the ZIP archive
+	if _, err := io.Copy(dataFile, tempCsvFile); err != nil {
 		http.Error(w, "Unable to copy data to zip file", http.StatusInternalServerError)
 		return
 	}
 
-	// Отправляем ZIP-файл клиенту
+	// Ensure all data is written to the zip file
+	if err := zipWriter.Close(); err != nil {
+		http.Error(w, "Unable to close zip writer", http.StatusInternalServerError)
+		return
+	}
+
+	// Send the ZIP file to the client
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=data.zip")
 	http.ServeFile(w, r, zipFile.Name())
