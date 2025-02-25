@@ -1,23 +1,27 @@
 package main
 
 import (
-	"itmo-devops-fp1/internal/handler" // Убедитесь, что путь правильный
+	"itmo-devops-fp1/internal/handler"
 	"log"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 func main() {
-	http.HandleFunc("/api/v0/prices", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodPost:
-			handler.UploadHandler(w, r)
-		case http.MethodGet:
-			handler.DownloadHandler(w, r)
-		default:
-			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		}
+	// Создаем новый роутер
+	r := chi.NewRouter()
+
+	// Добавляем middleware (опционально)
+	r.Use(middleware.Logger) // Логирование всех запросов
+
+	// Регистрируем маршруты
+	r.Route("/api/v0", func(r chi.Router) {
+		r.Post("/prices", handler.UploadHandler)  // POST /api/v0/prices
+		r.Get("/prices", handler.DownloadHandler) // GET /api/v0/prices
 	})
 
 	log.Println("Server started on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe(":8080", r))
 }
