@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Настройка PostgreSQL
-sudo -u postgres psql -c "CREATE USER $POSTGRES_USER WITH PASSWORD '$POSTGRES_PASSWORD';"
-sudo -u postgres psql -c "CREATE DATABASE \"$POSTGRES_DB\" OWNER $POSTGRES_USER;"
-psql "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" -c "
+sudo -u postgres psql -c "CREATE USER validator WITH PASSWORD 'val1dat0r';"
+sudo -u postgres psql -c "CREATE DATABASE \"project-sem-1\" OWNER validator;"
+psql "postgresql://validator:val1dat0r@localhost:5432/project-sem-1" -c "
 CREATE TABLE IF NOT EXISTS prices (
     id SERIAL PRIMARY KEY,
     created_at DATE,
