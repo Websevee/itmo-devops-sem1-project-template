@@ -1,7 +1,18 @@
 #!/bin/bash
 
-# Установка PostgreSQL
 sudo apt-get update
+
+# Установка Golang
+echo "Установка Golang..."
+sudo rm go1.24.0.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.24.0.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.24.0.linux-amd64.tar.gz
+sudo rm go1.24.0.linux-amd64.tar.gz
+export PATH=$PATH:/usr/local/go/bin
+go version
+
+# Установка PostgreSQL
+echo "Установка PostgreSQL..."
 sudo apt-get install -y postgresql postgresql-contrib
 
 # Запуск PostgreSQL
