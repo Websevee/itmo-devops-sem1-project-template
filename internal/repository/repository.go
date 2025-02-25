@@ -92,7 +92,7 @@ func processRecord(record []string, db *sql.DB, totalItems *int, categories map[
 
 	err = insertProductIntoDB(db, product)
 	if err != nil {
-		return errors.New("unable to insert data into database" + err.Error())
+		return errors.New("unable to insert data into database: " + err.Error())
 	}
 
 	// обновляем статистику
