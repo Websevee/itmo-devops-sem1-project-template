@@ -22,6 +22,10 @@ func main() {
 		r.Get("/prices", handler.DownloadHandler) // GET /api/v0/prices
 	})
 
-	log.Println("Server started on :8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	go func() {
+		log.Println("Server started on :8080")
+		if err := http.ListenAndServe(":8080", r); err != nil {
+			log.Fatalf("Server failed to start: %v", err)
+		}
+	}()
 }
