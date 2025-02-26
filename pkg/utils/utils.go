@@ -16,7 +16,7 @@ func ConnectDB() *sql.DB {
 
 	db, err := sql.Open("postgres", fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		"locahost",
+		"localhost",
 		"5432",
 		"validator",
 		"val1dat0r",
@@ -30,7 +30,7 @@ func ConnectDB() *sql.DB {
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v", err)
 	}
-	defer db.Close()
+	// defer db.Close()
 
 	fmt.Println("Connected to the database!")
 
