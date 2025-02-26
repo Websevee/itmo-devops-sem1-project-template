@@ -1,15 +1,14 @@
 #!/bin/bash
 
-# Настройка PostgreSQL
-until pg_isready -h localhost -p 5432 -U validator; do
-    sleep 1
-done
-echo "PostgreSQL доступен."
+# Установка Go-зависимостей
+go mod tidy
 
 # Создание пользователя и базы данных
 echo "1"
 
-export PGPASSWORD='val1dat0r'
+# ! PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME
+
+export PGPASSWORD=val1dat0r
 psql -h localhost -p 5432 -U validator -c "CREATE DATABASE \"project-sem-1\" OWNER validator;"
 
 echo "2"
@@ -22,6 +21,3 @@ CREATE TABLE IF NOT EXISTS prices (
     category TEXT,
     price NUMERIC
 );"
-
-# Установка Go-зависимостей
-go mod tidy
