@@ -125,11 +125,11 @@ func writeProductsToCSV(file *os.File, products []types.Product) error {
 
 	for _, product := range products {
 		record := []string{
-			strconv.Itoa(product.Id),
-			product.CreatedAt,
+			strconv.Itoa(product.ProductId),
 			product.Name,
 			product.Category,
 			strconv.FormatFloat(product.Price, 'f', 2, 64),
+			product.CreatedAt,
 		}
 		if err := writer.Write(record); err != nil {
 			return fmt.Errorf("не удалось записать в CSV: %w", err)

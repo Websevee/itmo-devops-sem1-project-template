@@ -126,7 +126,7 @@ func processCSVReader(reader *csv.Reader, stats *processStats) error {
 
 // Извлекает данные из базы данных
 func FetchData() ([]types.Product, error) {
-	rows, err := db.Query("SELECT id, created_at, name, category, price FROM prices")
+	rows, err := db.Query("SELECT id, product_id, created_at, name, category, price FROM prices")
 	if err != nil {
 		return nil, errors.New("не удалось выполнить запрос к базе данных")
 	}
@@ -135,7 +135,7 @@ func FetchData() ([]types.Product, error) {
 	var products []types.Product
 	for rows.Next() {
 		var product types.Product
-		if err := rows.Scan(&product.Id, &product.CreatedAt, &product.Name, &product.Category, &product.Price); err != nil {
+		if err := rows.Scan(&product.Id, &product.ProductId, &product.CreatedAt, &product.Name, &product.Category, &product.Price); err != nil {
 			return nil, errors.New("ошибка чтения данных")
 		}
 		products = append(products, product)
@@ -164,9 +164,9 @@ func processRecord(record []string, stats *processStats) error {
 
 // Преобразует CSV-строку в структуру Product
 func mapRecordToProduct(record []string) (types.Product, error) {
-	id, err := strconv.Atoi(record[0])
+	productId, err := strconv.Atoi(record[0])
 	if err != nil {
-		return types.Product{}, errors.New("неверный формат Id")
+		return types.Product{}, errors.New("неверный формат ProductId")
 	}
 
 	price, err := strconv.ParseFloat(record[3], 64)
@@ -175,7 +175,7 @@ func mapRecordToProduct(record []string) (types.Product, error) {
 	}
 
 	return types.Product{
-		Id:        id,
+		ProductId: productId,
 		CreatedAt: record[4],
 		Name:      record[1],
 		Category:  record[2],
@@ -185,7 +185,7 @@ func mapRecordToProduct(record []string) (types.Product, error) {
 
 // Вставляет данные о продукте в базу данных
 func insertProductIntoDB(db *sql.DB, product types.Product) error {
-	_, err := db.Exec("INSERT INTO prices (id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
-		product.Id, product.CreatedAt, product.Name, product.Category, product.Price)
+	_, err := db.Exec("INSERT INTO prices (product_id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
+		product.ProductId, product.CreatedAt, product.Name, product.Category, product.Price)
 	return err
 }
