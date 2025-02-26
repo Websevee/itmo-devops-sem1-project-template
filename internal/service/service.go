@@ -182,3 +182,35 @@ func serveZipFile(w http.ResponseWriter, r *http.Request, zipFile *os.File) erro
 	http.ServeFile(w, r, zipFile.Name())
 	return nil
 }
+
+func ProcessCSVFile(filename string) (types.GetPricesResponse, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return types.GetPricesResponse{}, fmt.Errorf("не удалось открыть файл: %w", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return types.GetPricesResponse{}, fmt.Errorf("ошибка чтения CSV: %w", err)
+	}
+
+	// Вычитаем строку заголовков
+	totalCount := len(records) - 1
+
+	// Пропускаем заголовки
+	for i := 1; i < len(records); i++ {
+		product, err := repository.MapRecordToProduct(records[i])
+		if err != nil {
+			return types.GetPricesResponse{}, fmt.Errorf("ошибка обработки записи %d: %w", i, err)
+		}
+
+		if err := repository.InsertProductIntoDB(product); err != nil {
+			return types.GetPricesResponse{}, fmt.Errorf("ошибка вставки в БД: %w", err)
+		}
+	}
+
+	// Получаем статистику, передавая общее количество строк
+	return repository.GetStatistics(totalCount)
+}

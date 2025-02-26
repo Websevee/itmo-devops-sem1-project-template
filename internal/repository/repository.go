@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"io"
 	"itmo-devops-fp1/internal/types"
 	"itmo-devops-fp1/pkg/utils"
@@ -185,6 +186,78 @@ func mapRecordToProduct(record []string) (types.Product, error) {
 
 // Вставляет данные о продукте в базу данных
 func insertProductIntoDB(db *sql.DB, product types.Product) error {
+	_, err := db.Exec("INSERT INTO prices (product_id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
+		product.ProductId, product.CreatedAt, product.Name, product.Category, product.Price)
+	return err
+}
+
+// Возвращает статистику по загруженным данным
+func GetStatistics(totalCount int) (types.GetPricesResponse, error) {
+	var response types.GetPricesResponse
+	response.TotalCount = totalCount
+
+	// Подсчет дубликатов
+	err := db.QueryRow(`
+		SELECT COUNT(*) - COUNT(DISTINCT product_id) 
+		FROM prices
+	`).Scan(&response.DuplicatesCount)
+	if err != nil {
+		return response, fmt.Errorf("ошибка подсчета дубликатов: %w", err)
+	}
+
+	// Подсчет общего количества элементов
+	err = db.QueryRow(`
+		SELECT COUNT(*) 
+		FROM prices
+	`).Scan(&response.TotalItems)
+	if err != nil {
+		return response, fmt.Errorf("ошибка подсчета элементов: %w", err)
+	}
+
+	// Подсчет уникальных категорий
+	err = db.QueryRow(`
+		SELECT COUNT(DISTINCT category) 
+		FROM prices
+	`).Scan(&response.TotalCategories)
+	if err != nil {
+		return response, fmt.Errorf("ошибка подсчета категорий: %w", err)
+	}
+
+	// Подсчет общей стоимости
+	err = db.QueryRow(`
+		SELECT COALESCE(SUM(price), 0) 
+		FROM prices
+	`).Scan(&response.TotalPrice)
+	if err != nil {
+		return response, fmt.Errorf("ошибка подсчета общей стоимости: %w", err)
+	}
+
+	return response, nil
+}
+
+// Преобразует CSV-строку в структуру Product
+func MapRecordToProduct(record []string) (types.Product, error) {
+	productId, err := strconv.Atoi(record[0])
+	if err != nil {
+		return types.Product{}, errors.New("неверный формат ProductId")
+	}
+
+	price, err := strconv.ParseFloat(record[3], 64)
+	if err != nil {
+		return types.Product{}, errors.New("неверный формат цены")
+	}
+
+	return types.Product{
+		ProductId: productId,
+		CreatedAt: record[4],
+		Name:      record[1],
+		Category:  record[2],
+		Price:     price,
+	}, nil
+}
+
+// Вставляет данные о продукте в базу данных
+func InsertProductIntoDB(product types.Product) error {
 	_, err := db.Exec("INSERT INTO prices (product_id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
 		product.ProductId, product.CreatedAt, product.Name, product.Category, product.Price)
 	return err
