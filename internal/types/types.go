@@ -1,7 +1,15 @@
 package types
 
+type ArchiveType string
+
+const (
+	Zip ArchiveType = "zip"
+	Tar ArchiveType = "tar"
+)
+
 type Product struct {
 	Id        int
+	ProductId int
 	CreatedAt string
 	Name      string
 	Category  string

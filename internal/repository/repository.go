@@ -1,12 +1,15 @@
 package repository
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"database/sql"
 	"encoding/csv"
 	"errors"
+	"io"
 	"itmo-devops-fp1/internal/types"
 	"itmo-devops-fp1/pkg/utils"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -17,65 +20,123 @@ func init() {
 	db = utils.ConnectDB()
 }
 
-// обрабатывает zip-архив и сохраняет данные в базу данных
+// Общая структура для хранения статистики обработки
+type processStats struct {
+	totalItems int
+	categories map[string]bool
+	totalPrice float64
+}
+
+// Создает новый экземпляр статистики
+func newProcessStats() *processStats {
+	return &processStats{
+		categories: make(map[string]bool),
+	}
+}
+
+// Преобразует статистику в ответ API
+func (ps *processStats) toResponse() types.GetPricesResponse {
+	return types.GetPricesResponse{
+		TotalItems:      ps.totalItems,
+		TotalCategories: len(ps.categories),
+		TotalPrice:      ps.totalPrice,
+	}
+}
+
+// Обрабатывает zip-архив и сохраняет данные в базу данных
 func ProcessZip(zipPath string) (types.GetPricesResponse, error) {
 	zipReader, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return types.GetPricesResponse{}, errors.New("unable to open zip file")
+		return types.GetPricesResponse{}, errors.New("не удалось открыть zip-файл")
 	}
 	defer zipReader.Close()
 
-	var totalItems int
-	var totalPrice float64
-	categories := make(map[string]bool)
+	stats := newProcessStats()
 
 	for _, f := range zipReader.File {
-		if strings.HasSuffix(f.Name, "data.csv") {
-			csvFile, err := f.Open()
-			if err != nil {
-				return types.GetPricesResponse{}, errors.New("unable to open CSV file")
-			}
-			defer csvFile.Close()
+		if !strings.HasSuffix(f.Name, "data.csv") {
+			continue
+		}
 
-			reader := csv.NewReader(csvFile)
-			records, err := reader.ReadAll()
-			if err != nil {
-				return types.GetPricesResponse{}, errors.New("unable to read CSV file")
-			}
+		if err := processZipFile(f, stats); err != nil {
+			return types.GetPricesResponse{}, err
+		}
+	}
 
-			// убираем шапку
-			records = records[1:]
+	return stats.toResponse(), nil
+}
 
-			for _, record := range records {
-				err := processRecord(record, db, &totalItems, categories, &totalPrice)
-				if err != nil {
-					return types.GetPricesResponse{}, err
-				}
+// Обрабатывает один файл из zip-архива
+func processZipFile(f *zip.File, stats *processStats) error {
+	csvFile, err := f.Open()
+	if err != nil {
+		return errors.New("не удалось открыть CSV файл")
+	}
+	defer csvFile.Close()
+
+	return processCSVReader(csv.NewReader(csvFile), stats)
+}
+
+// Обрабатывает tar-архив
+func ProcessTar(filename string) (types.GetPricesResponse, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return types.GetPricesResponse{}, errors.New("не удалось открыть tar-файл")
+	}
+	defer file.Close()
+
+	stats := newProcessStats()
+	tr := tar.NewReader(file)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return types.GetPricesResponse{}, errors.New("ошибка чтения tar-архива")
+		}
+
+		if header.Typeflag == tar.TypeReg && strings.HasSuffix(header.Name, ".csv") {
+			if err := processCSVReader(csv.NewReader(tr), stats); err != nil {
+				return types.GetPricesResponse{}, err
 			}
 		}
 	}
 
-	return types.GetPricesResponse{
-		TotalItems:      totalItems,
-		TotalCategories: len(categories),
-		TotalPrice:      totalPrice,
-	}, nil
+	return stats.toResponse(), nil
 }
 
-// извлекает данные из базы данных
-func FetchData() ([]types.Product, error) {
-	rows, err := db.Query("SELECT id, created_at, name, category, price FROM prices")
+// Обрабатывает CSV-данные из reader
+func processCSVReader(reader *csv.Reader, stats *processStats) error {
+	records, err := reader.ReadAll()
 	if err != nil {
-		return nil, errors.New("unable to query database")
+		return errors.New("ошибка чтения CSV файла")
+	}
+
+	// Пропускаем заголовок
+	for _, record := range records[1:] {
+		if err := processRecord(record, stats); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Извлекает данные из базы данных
+func FetchData() ([]types.Product, error) {
+	rows, err := db.Query("SELECT id, product_id, created_at, name, category, price FROM prices")
+	if err != nil {
+		return nil, errors.New("не удалось выполнить запрос к базе данных")
 	}
 	defer rows.Close()
 
 	var products []types.Product
 	for rows.Next() {
 		var product types.Product
-		err := rows.Scan(&product.Id, &product.CreatedAt, &product.Name, &product.Category, &product.Price)
-		if err != nil {
-			return nil, errors.New("unable to scan row")
+		if err := rows.Scan(&product.Id, &product.ProductId, &product.CreatedAt, &product.Name, &product.Category, &product.Price); err != nil {
+			return nil, errors.New("ошибка чтения данных")
 		}
 		products = append(products, product)
 	}
@@ -83,40 +144,38 @@ func FetchData() ([]types.Product, error) {
 	return products, nil
 }
 
-// обрабатывает одну запись из CSV и вставляет данные в базу данных
-func processRecord(record []string, db *sql.DB, totalItems *int, categories map[string]bool, totalPrice *float64) error {
+// Обрабатывает одну запись из CSV и обновляет статистику
+func processRecord(record []string, stats *processStats) error {
 	product, err := mapRecordToProduct(record)
 	if err != nil {
 		return err
 	}
 
-	err = insertProductIntoDB(db, product)
-	if err != nil {
-		return errors.New("unable to insert data into database: " + err.Error())
+	if err := insertProductIntoDB(db, product); err != nil {
+		return errors.New("ошибка вставки в базу данных: " + err.Error())
 	}
 
-	// обновляем статистику
-	*totalItems++
-	categories[product.Category] = true
-	*totalPrice += product.Price
+	stats.totalItems++
+	stats.categories[product.Category] = true
+	stats.totalPrice += product.Price
 
 	return nil
 }
 
-// преобразует CSV-строку в структуру Product
+// Преобразует CSV-строку в структуру Product
 func mapRecordToProduct(record []string) (types.Product, error) {
-	id, err := strconv.Atoi(record[0])
+	productId, err := strconv.Atoi(record[0])
 	if err != nil {
-		return types.Product{}, errors.New("invalid Id format")
+		return types.Product{}, errors.New("неверный формат ProductId")
 	}
 
 	price, err := strconv.ParseFloat(record[3], 64)
 	if err != nil {
-		return types.Product{}, errors.New("invalid price format")
+		return types.Product{}, errors.New("неверный формат цены")
 	}
 
 	return types.Product{
-		Id:        id,
+		ProductId: productId,
 		CreatedAt: record[4],
 		Name:      record[1],
 		Category:  record[2],
@@ -124,9 +183,9 @@ func mapRecordToProduct(record []string) (types.Product, error) {
 	}, nil
 }
 
-// вставляет данные о продукте в базу данных
+// Вставляет данные о продукте в базу данных
 func insertProductIntoDB(db *sql.DB, product types.Product) error {
-	_, err := db.Exec("INSERT INTO prices (id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
-		product.Id, product.CreatedAt, product.Name, product.Category, product.Price)
+	_, err := db.Exec("INSERT INTO prices (product_id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
+		product.ProductId, product.CreatedAt, product.Name, product.Category, product.Price)
 	return err
 }
