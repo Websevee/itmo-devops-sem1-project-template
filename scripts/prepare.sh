@@ -9,7 +9,7 @@ echo "PostgreSQL доступен."
 # Создание пользователя и базы данных
 echo "1"
 
-psql -U validator -c "CREATE DATABASE \"project-sem-1\" OWNER validator;"
+psql -h localhost -p 5432 -U validator -c "CREATE DATABASE \"project-sem-1\" OWNER validator;"
 
 echo "2"
 
