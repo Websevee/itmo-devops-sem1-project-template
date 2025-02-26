@@ -38,6 +38,17 @@ func DownloadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Проверяем наличие параметров фильтрации
+	if r.URL.Query().Has("start") {
+		err := service.ProcessFilteredDownload(w, r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		return
+	}
+
+	// Если параметров нет, возвращаем все данные
 	err := service.ProcessDownload(w, r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 )
 
 // Обрабатывает загрузку данных из архива
@@ -196,10 +197,7 @@ func ProcessCSVFile(filename string) (types.GetPricesResponse, error) {
 		return types.GetPricesResponse{}, fmt.Errorf("ошибка чтения CSV: %w", err)
 	}
 
-	// Вычитаем строку заголовков
-	totalCount := len(records) - 1
-
-	// Пропускаем заголовки
+	// Пропускаем заголовки при обработке
 	for i := 1; i < len(records); i++ {
 		product, err := repository.MapRecordToProduct(records[i])
 		if err != nil {
@@ -211,6 +209,65 @@ func ProcessCSVFile(filename string) (types.GetPricesResponse, error) {
 		}
 	}
 
-	// Получаем статистику, передавая общее количество строк
-	return repository.GetStatistics(totalCount)
+	// Передаем все records для подсчета статистики
+	return repository.GetStatistics(records)
+}
+
+// Обрабатывает скачивание отфильтрованных данных
+func ProcessFilteredDownload(w http.ResponseWriter, r *http.Request) error {
+	// Получаем и валидируем параметры
+	start := r.URL.Query().Get("start")
+	end := r.URL.Query().Get("end")
+	minStr := r.URL.Query().Get("min")
+	maxStr := r.URL.Query().Get("max")
+
+	// Проверяем формат дат
+	if _, err := time.Parse("2006-01-02", start); err != nil {
+		return fmt.Errorf("неверный формат начальной даты: %w", err)
+	}
+	if _, err := time.Parse("2006-01-02", end); err != nil {
+		return fmt.Errorf("неверный формат конечной даты: %w", err)
+	}
+
+	// Парсим min и max
+	min, err := strconv.ParseInt(minStr, 10, 64)
+	if err != nil || min <= 0 {
+		return errors.New("неверное значение минимальной цены")
+	}
+
+	max, err := strconv.ParseInt(maxStr, 10, 64)
+	if err != nil || max <= 0 {
+		return errors.New("неверное значение максимальной цены")
+	}
+
+	if min > max {
+		return errors.New("минимальная цена не может быть больше максимальной")
+	}
+
+	// Преобразуем в float64 для запроса к БД
+	minPrice := float64(min)
+	maxPrice := float64(max)
+
+	// Получаем отфильтрованные данные
+	products, err := repository.FetchFilteredData(start, end, minPrice, maxPrice)
+	if err != nil {
+		return fmt.Errorf("ошибка получения данных: %w", err)
+	}
+
+	// Создаем временный CSV файл
+	tempCsvFile, err := createTempCSV(products)
+	if err != nil {
+		return err
+	}
+	defer cleanupFile(tempCsvFile)
+
+	// Создаем ZIP архив
+	zipFile, err := createZipFromCSV(tempCsvFile)
+	if err != nil {
+		return err
+	}
+	defer cleanupFile(zipFile)
+
+	// Отправляем файл клиенту
+	return serveZipFile(w, r, zipFile)
 }
