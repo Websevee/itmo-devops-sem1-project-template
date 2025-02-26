@@ -9,7 +9,7 @@ echo "1"
 # ! PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME
 
 export PGPASSWORD=val1dat0r
-psql -h localhost -p 5432 -U validator -c "CREATE DATABASE project-sem-1 OWNER validator;"
+psql -h localhost -p 5432 -U validator -c "CREATE DATABASE project-sem-1;"
 
 echo "2"
 
