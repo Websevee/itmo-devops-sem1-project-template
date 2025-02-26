@@ -2,12 +2,18 @@
 
 # Настройка PostgreSQL
 until pg_isready -h localhost -p 5432 -U validator; do
-  sleep 1
+    sleep 1
 done
 echo "PostgreSQL доступен."
 
 # Создание пользователя и базы данных
+echo "1"
+
+
 psql -c "CREATE DATABASE \"project-sem-1\" OWNER validator;"
+
+echo "2"
+
 psql "postgresql://validator:val1dat0r@localhost:5432/project-sem-1" -c "
 CREATE TABLE IF NOT EXISTS prices (
     id SERIAL PRIMARY KEY,
