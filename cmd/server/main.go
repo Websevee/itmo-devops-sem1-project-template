@@ -28,4 +28,7 @@ func main() {
 			log.Fatalf("Server failed to start: %v", err)
 		}
 	}()
+
+	// Основной поток завершается, но сервер продолжает работать
+	log.Println("Server is running...")
 }
