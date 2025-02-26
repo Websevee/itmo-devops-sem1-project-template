@@ -2,7 +2,7 @@
 
 go run cmd/server/main.go &
 
-sleep 5
+# sleep 5
 
 # Сохраняем PID процесса сервера
 SERVER_PID=$!

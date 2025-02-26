@@ -7,8 +7,8 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # Конфигурация
-API_HOST="http://localhost:8080"
-DB_HOST="localhost"
+API_HOST="http://172.18.112.1:8080"
+DB_HOST="172.18.112.1"
 DB_PORT="5432"
 DB_NAME="project-sem-1"
 DB_USER="validator"
@@ -232,8 +232,9 @@ check_postgres() {
     echo -e "\nПроверка PostgreSQL (Уровень $level)"
     
     # Базовая проверка подключения для всех уровней
-    if ! PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c '\q' 2>/dev/null; then
+    if ! PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c '\q'; then
         echo -e "${RED}✗ PostgreSQL недоступен${NC}"
+        echo -e "${RED}$DB_PASSWORD $DB_HOST $DB_USER $DB_NAME${NC}"
         return 1
     fi
     
