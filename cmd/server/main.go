@@ -26,12 +26,17 @@ func main() {
 		r.Get("/prices", handler.DownloadHandler) // GET /api/v0/prices
 	})
 
-	go func() {
-		log.Println("Server started on :8080")
-		if err := http.ListenAndServe(":8080", r); err != nil {
-			log.Fatalf("Server failed to start: %v", err)
-		}
-	}()
+	log.Println("Server started on :8080")
+	if err := http.ListenAndServe(":8080", r); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
+	}
+
+	// go func() {
+	// 	log.Println("Server started on :8080")
+	// 	if err := http.ListenAndServe(":8080", r); err != nil {
+	// 		log.Fatalf("Server failed to start: %v", err)
+	// 	}
+	// }()
 
 	// Основной поток завершается, но сервер продолжает работать
 	fmt.Println("Server is running...")

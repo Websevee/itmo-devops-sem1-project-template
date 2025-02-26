@@ -6,6 +6,7 @@ go run cmd/server/main.go &
 
 # Сохраняем PID процесса сервера
 SERVER_PID=$!
+sleep 5
 
 # Выводим PID для информации
 echo "Сервер запущен с PID: $SERVER_PID"
