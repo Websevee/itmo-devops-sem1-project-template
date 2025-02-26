@@ -9,20 +9,56 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func ConnectDB() *sql.DB {
-	db, err := sql.Open("postgres", fmt.Sprintf(
+// Конфигурация подключения к базе данных
+type DBConfig struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	DBName   string
+}
+
+// Получает конфигурацию из переменных окружения
+func getDBConfig() DBConfig {
+	return DBConfig{
+		Host:     getEnvOrDefault("POSTGRES_HOST", "localhost"),
+		Port:     getEnvOrDefault("POSTGRES_PORT", "5432"),
+		User:     getEnvOrDefault("POSTGRES_USER", "validator"),
+		Password: getEnvOrDefault("POSTGRES_PASSWORD", "val1dat0r"),
+		DBName:   getEnvOrDefault("POSTGRES_DB", "project-sem-1"),
+	}
+}
+
+// Получает значение переменной окружения или возвращает значение по умолчанию
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// Создает строку подключения из конфигурации
+func buildConnectionString(config DBConfig) string {
+	return fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		os.Getenv("POSTGRES_HOST"),
-		os.Getenv("POSTGRES_PORT"),
-		os.Getenv("POSTGRES_USER"),
-		os.Getenv("POSTGRES_PASSWORD"),
-		os.Getenv("POSTGRES_DB"),
-	))
+		config.Host, config.Port, config.User, config.Password, config.DBName,
+	)
+}
+
+// Подключается к базе данных
+func ConnectDB() *sql.DB {
+	config := getDBConfig()
+	connStr := buildConnectionString(config)
+
+	db, err := sql.Open("postgres", connStr)
 	if err != nil {
-		log.Fatalf("Unable to connect to database: %v", err)
+		log.Fatalf("Не удалось подключиться к базе данных: %v", err)
 	}
 
-	fmt.Println("Connected to the database!")
+	if err = db.Ping(); err != nil {
+		log.Fatalf("Не удалось проверить подключение к базе данных: %v", err)
+	}
 
+	log.Println("Успешное подключение к базе данных")
 	return db
 }

@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"itmo-devops-fp1/internal/service"
+	"itmo-devops-fp1/internal/types"
 	"net/http"
 )
 
@@ -13,7 +14,14 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := service.ProcessUpload(r)
+	// Получаем тип архива из параметра запроса
+	archiveType := r.URL.Query().Get("type")
+	if archiveType == "" {
+		archiveType = "zip" // По умолчанию zip
+	}
+
+	response, err := service.ProcessUpload(r, types.ArchiveType(archiveType))
+
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

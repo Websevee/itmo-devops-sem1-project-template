@@ -1,10 +1,10 @@
 package types
 
-type ArchiveType int
+type ArchiveType string
 
 const (
-	Zip ArchiveType = iota // 0
-	Tar                    // 1
+	Zip ArchiveType = "zip"
+	Tar ArchiveType = "tar"
 )
 
 type Product struct {
