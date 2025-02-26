@@ -10,6 +10,8 @@ import (
 )
 
 func main() {
+	log.Println("Server is starting...")
+
 	// Создаем новый роутер
 	r := chi.NewRouter()
 

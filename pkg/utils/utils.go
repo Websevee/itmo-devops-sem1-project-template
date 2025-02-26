@@ -10,6 +10,9 @@ import (
 )
 
 func ConnectDB() *sql.DB {
+	log.Println("HOST: ")
+	log.Println("HOST: " + os.Getenv("POSTGRES_HOST"))
+
 	db, err := sql.Open("postgres", fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		os.Getenv("POSTGRES_HOST"),
