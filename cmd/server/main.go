@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"itmo-devops-fp1/internal/handler"
 	"log"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 )
 
 func main() {
+	fmt.Println("Server is starting...")
 	log.Println("Server is starting...")
 
 	// Создаем новый роутер
@@ -32,5 +34,6 @@ func main() {
 	}()
 
 	// Основной поток завершается, но сервер продолжает работать
+	fmt.Println("Server is running...")
 	log.Println("Server is running...")
 }
