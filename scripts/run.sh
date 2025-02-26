@@ -1,16 +1,15 @@
 #!/bin/bash
 
-go run cmd/server/main.go 
-# go run cmd/server/main.go &
 
-# # sleep 5
+go run cmd/server/main.go &
 
-# # Сохраняем PID процесса сервера
-# SERVER_PID=$!
 # sleep 5
 
-# # Выводим PID для информации
-# echo "Сервер запущен с PID: $SERVER_PID"
+# Сохраняем PID процесса сервера
+SERVER_PID=$!
 
-# # Завершаем скрипт, но оставляем сервер работать
-# exit 0
+# Выводим PID для информации
+echo "Сервер запущен с PID: $SERVER_PID"
+
+# Завершаем скрипт, но оставляем сервер работать
+exit 0
