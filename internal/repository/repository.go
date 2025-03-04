@@ -21,6 +21,123 @@ func init() {
 	db = utils.ConnectDB()
 }
 
+// CloseDB закрывает соединение с базой данных
+func CloseDB() {
+	if db != nil {
+		db.Close()
+	}
+}
+
+// Извлекает данные из базы данных
+func FetchData() ([]types.Product, error) {
+	rows, err := db.Query("SELECT id, created_at, name, category, price FROM prices")
+	if err != nil {
+		return nil, errors.New("не удалось выполнить запрос к базе данных")
+	}
+	defer rows.Close()
+
+	var products []types.Product
+	for rows.Next() {
+		var product types.Product
+		if err := rows.Scan(&product.Id, &product.CreatedAt, &product.Name, &product.Category, &product.Price); err != nil {
+			return nil, errors.New("ошибка чтения данных")
+		}
+		products = append(products, product)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ошибка при итерации по результатам: %w", err)
+	}
+
+	return products, nil
+}
+
+// Получает отфильтрованные данные из БД
+func FetchFilteredData(start, end string, min, max float64) ([]types.Product, error) {
+	query := `
+		SELECT id, created_at, name, category, price 
+		FROM prices 
+		WHERE created_at >= $1 
+		AND created_at <= $2 
+		AND price >= $3 
+		AND price <= $4
+	`
+
+	rows, err := db.Query(query, start, end, min, max)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка выполнения запроса: %w", err)
+	}
+	defer rows.Close()
+
+	var products []types.Product
+	for rows.Next() {
+		var product types.Product
+		if err := rows.Scan(
+			&product.Id,
+			&product.CreatedAt,
+			&product.Name,
+			&product.Category,
+			&product.Price,
+		); err != nil {
+			return nil, fmt.Errorf("ошибка сканирования данных: %w", err)
+		}
+		products = append(products, product)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ошибка при итерации по результатам: %w", err)
+	}
+
+	return products, nil
+}
+
+// Возвращает статистику по загруженным данным
+func GetStatistics(products []types.Product) (types.GetPricesResponse, error) {
+	var response types.GetPricesResponse
+
+	// Получаем все статистические данные одним запросом
+	var dbDupsCount, totalCategories int
+	var totalPrice float64
+	err := db.QueryRow(`
+		SELECT 
+			COUNT(*) - COUNT(DISTINCT (name, category, price)) as duplicates,
+			COUNT(DISTINCT category) as categories,
+			COALESCE(SUM(price), 0) as total_price
+		FROM prices
+	`).Scan(&dbDupsCount, &totalCategories, &totalPrice)
+	if err != nil {
+		return response, fmt.Errorf("ошибка получения статистики из БД: %w", err)
+	}
+
+	response.TotalCount = len(products)
+	response.DuplicatesCount = dbDupsCount
+	response.TotalItems = countUniqueProducts(products)
+	response.TotalCategories = totalCategories
+	response.TotalPrice = totalPrice
+
+	return response, nil
+}
+
+// Подсчитывает количество уникальных товаров по всем полям, кроме id
+func countUniqueProducts(products []types.Product) int {
+	uniqueCount := 0
+	for i := 0; i < len(products); i++ {
+		isUnique := true
+		for j := 0; j < i; j++ {
+			if products[i].Name == products[j].Name &&
+				products[i].Category == products[j].Category &&
+				products[i].Price == products[j].Price {
+				isUnique = false
+				break
+			}
+		}
+		if isUnique {
+			uniqueCount++
+		}
+	}
+	return uniqueCount
+}
+
 // Обрабатывает ZIP-архив
 func ProcessZip(filename string) (types.GetPricesResponse, error) {
 	reader, err := zip.OpenReader(filename)
@@ -109,72 +226,115 @@ func ProcessTar(filename string) (types.GetPricesResponse, error) {
 	return ProcessCSVFile(resultFile.Name())
 }
 
-// Извлекает данные из базы данных
-func FetchData() ([]types.Product, error) {
-	rows, err := db.Query("SELECT id, created_at, name, category, price FROM prices")
+// readCSVRecords читает записи из CSV файла
+func readCSVRecords(filename string) ([][]string, error) {
+	file, err := os.Open(filename)
 	if err != nil {
-		return nil, errors.New("не удалось выполнить запрос к базе данных")
+		return nil, fmt.Errorf("не удалось открыть файл: %w", err)
 	}
-	defer rows.Close()
+	defer file.Close()
 
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("ошибка чтения CSV: %w", err)
+	}
+
+	return records, nil
+}
+
+// processRecords обрабатывает записи и вставляет их в БД
+func processRecords(tx *sql.Tx, records [][]string) ([]types.Product, int, error) {
 	var products []types.Product
-	for rows.Next() {
-		var product types.Product
-		if err := rows.Scan(&product.Id, &product.CreatedAt, &product.Name, &product.Category, &product.Price); err != nil {
-			return nil, errors.New("ошибка чтения данных")
+	var insertedCount int
+
+	// Пропускаем заголовки при обработке
+	for i := 1; i < len(records); i++ {
+		product, err := MapRecordToProduct(records[i])
+		if err != nil {
+			return nil, 0, fmt.Errorf("ошибка обработки записи %d: %w", i, err)
+		}
+
+		result, err := tx.Exec(`
+			INSERT INTO prices (id, created_at, name, category, price) 
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (id) DO NOTHING`,
+			product.Id, product.CreatedAt, product.Name, product.Category, product.Price)
+		if err != nil {
+			return nil, 0, fmt.Errorf("ошибка вставки в БД: %w", err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return nil, 0, fmt.Errorf("ошибка получения количества вставленных строк: %w", err)
+		}
+		if rowsAffected > 0 {
+			insertedCount++
 		}
 		products = append(products, product)
 	}
 
-	return products, nil
+	return products, insertedCount, nil
 }
 
-// Возвращает статистику по загруженным данным
-func GetStatistics(products []types.Product) (types.GetPricesResponse, error) {
-	var response types.GetPricesResponse
-
-	// Получаем все статистические данные одним запросом
+// getStatisticsFromTransaction получает статистику в рамках транзакции
+func getStatisticsFromTransaction(tx *sql.Tx) (int, int, float64, error) {
 	var dbDupsCount, totalCategories int
 	var totalPrice float64
-	err := db.QueryRow(`
+
+	err := tx.QueryRow(`
 		SELECT 
-			COUNT(*) - COUNT(DISTINCT (created_at, name, category, price)) as duplicates,
+			COUNT(*) - COUNT(DISTINCT (name, category, price)) as duplicates,
 			COUNT(DISTINCT category) as categories,
 			COALESCE(SUM(price), 0) as total_price
 		FROM prices
 	`).Scan(&dbDupsCount, &totalCategories, &totalPrice)
 	if err != nil {
-		return response, fmt.Errorf("ошибка получения статистики из БД: %w", err)
+		return 0, 0, 0, fmt.Errorf("ошибка получения статистики из БД: %w", err)
 	}
 
-	response.TotalCount = len(products)
-	response.DuplicatesCount = dbDupsCount
-	response.TotalItems = countUniqueProducts(products)
-	response.TotalCategories = totalCategories
-	response.TotalPrice = totalPrice
-
-	return response, nil
+	return dbDupsCount, totalCategories, totalPrice, nil
 }
 
-// Подсчитывает количество уникальных товаров по всем полям, кроме id
-func countUniqueProducts(products []types.Product) int {
-	uniqueCount := 0
-	for i := 0; i < len(products); i++ {
-		isUnique := true
-		for j := 0; j < i; j++ {
-			if products[i].Name == products[j].Name &&
-				products[i].Category == products[j].Category &&
-				products[i].Price == products[j].Price &&
-				products[i].CreatedAt == products[j].CreatedAt {
-				isUnique = false
-				break
-			}
-		}
-		if isUnique {
-			uniqueCount++
-		}
+// Обрабатывает CSV файл и возвращает статистику
+func ProcessCSVFile(filename string) (types.GetPricesResponse, error) {
+	records, err := readCSVRecords(filename)
+	if err != nil {
+		return types.GetPricesResponse{}, err
 	}
-	return uniqueCount
+
+	// Начинаем транзакцию
+	tx, err := db.Begin()
+	if err != nil {
+		return types.GetPricesResponse{}, fmt.Errorf("ошибка начала транзакции: %w", err)
+	}
+	defer tx.Rollback() // Откатываем транзакцию в случае ошибки
+
+	products, insertedCount, err := processRecords(tx, records)
+	if err != nil {
+		return types.GetPricesResponse{}, err
+	}
+
+	dbDupsCount, totalCategories, totalPrice, err := getStatisticsFromTransaction(tx)
+	if err != nil {
+		return types.GetPricesResponse{}, err
+	}
+
+	// Подтверждаем транзакцию до формирования ответа
+	if err := tx.Commit(); err != nil {
+		return types.GetPricesResponse{}, fmt.Errorf("ошибка подтверждения транзакции: %w", err)
+	}
+
+	// Формируем ответ после успешного подтверждения транзакции
+	response := types.GetPricesResponse{
+		TotalCount:      len(products),
+		DuplicatesCount: dbDupsCount,
+		TotalItems:      insertedCount,
+		TotalCategories: totalCategories,
+		TotalPrice:      totalPrice,
+	}
+
+	return response, nil
 }
 
 // Преобразует CSV-строку в структуру Product
@@ -196,80 +356,4 @@ func MapRecordToProduct(record []string) (types.Product, error) {
 		Category:  record[2],
 		Price:     price,
 	}, nil
-}
-
-// Вставляет данные о продукте в базу данных
-func InsertProductIntoDB(product types.Product) error {
-	_, err := db.Exec(`
-		INSERT INTO prices (id, created_at, name, category, price) 
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (id) DO NOTHING`,
-		product.Id, product.CreatedAt, product.Name, product.Category, product.Price)
-	return err
-}
-
-// Получает отфильтрованные данные из БД
-func FetchFilteredData(start, end string, min, max float64) ([]types.Product, error) {
-	query := `
-		SELECT id, created_at, name, category, price 
-		FROM prices 
-		WHERE created_at >= $1 
-		AND created_at <= $2 
-		AND price >= $3 
-		AND price <= $4
-	`
-
-	rows, err := db.Query(query, start, end, min, max)
-	if err != nil {
-		return nil, fmt.Errorf("ошибка выполнения запроса: %w", err)
-	}
-	defer rows.Close()
-
-	var products []types.Product
-	for rows.Next() {
-		var product types.Product
-		if err := rows.Scan(
-			&product.Id,
-			&product.CreatedAt,
-			&product.Name,
-			&product.Category,
-			&product.Price,
-		); err != nil {
-			return nil, fmt.Errorf("ошибка сканирования данных: %w", err)
-		}
-		products = append(products, product)
-	}
-
-	return products, nil
-}
-
-// Обрабатывает CSV файл и возвращает статистику
-func ProcessCSVFile(filename string) (types.GetPricesResponse, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return types.GetPricesResponse{}, fmt.Errorf("не удалось открыть файл: %w", err)
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return types.GetPricesResponse{}, fmt.Errorf("ошибка чтения CSV: %w", err)
-	}
-
-	var products []types.Product
-	// Пропускаем заголовки при обработке
-	for i := 1; i < len(records); i++ {
-		product, err := MapRecordToProduct(records[i])
-		if err != nil {
-			return types.GetPricesResponse{}, fmt.Errorf("ошибка обработки записи %d: %w", i, err)
-		}
-
-		if err := InsertProductIntoDB(product); err != nil {
-			return types.GetPricesResponse{}, fmt.Errorf("ошибка вставки в БД: %w", err)
-		}
-		products = append(products, product)
-	}
-
-	return GetStatistics(products)
 }
