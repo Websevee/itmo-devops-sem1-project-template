@@ -2,6 +2,7 @@ package main
 
 import (
 	"itmo-devops-fp1/internal/handler"
+	"itmo-devops-fp1/internal/repository"
 	"log"
 	"net/http"
 
@@ -10,6 +11,7 @@ import (
 )
 
 func main() {
+	defer repository.CloseDB()
 	log.Println("Server is starting...")
 
 	// Создаем новый роутер

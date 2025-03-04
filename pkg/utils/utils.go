@@ -56,9 +56,17 @@ func ConnectDB() *sql.DB {
 	}
 
 	if err = db.Ping(); err != nil {
+		db.Close()
 		log.Fatalf("Не удалось проверить подключение к базе данных: %v", err)
 	}
 
 	log.Println("Успешное подключение к базе данных")
 	return db
+}
+
+// Закрывает соединение с базой данных
+func CloseDB(db *sql.DB) {
+	if db != nil {
+		db.Close()
+	}
 }

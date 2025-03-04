@@ -23,13 +23,103 @@ func ProcessUpload(r *http.Request, archiveType types.ArchiveType) (types.GetPri
 	}
 	defer file.Close()
 
-	tempFile, err := saveTempFile(file, archiveType)
-	if err != nil {
-		return types.GetPricesResponse{}, err
+	ext := ".zip"
+	if archiveType == types.Tar {
+		ext = ".tar"
 	}
-	defer os.Remove(tempFile.Name())
 
-	return processArchive(tempFile.Name(), archiveType)
+	archiveFile, err := os.Create("upload" + ext)
+	if err != nil {
+		return types.GetPricesResponse{}, errors.New("не удалось создать файл архива")
+	}
+	defer os.Remove(archiveFile.Name())
+
+	if _, err := io.Copy(archiveFile, file); err != nil {
+		return types.GetPricesResponse{}, errors.New("не удалось сохранить файл")
+	}
+
+	return processArchive(archiveFile.Name(), archiveType)
+}
+
+// Обрабатывает скачивание данных
+func ProcessDownload(w http.ResponseWriter, r *http.Request) error {
+	products, err := fetchProducts()
+	if err != nil {
+		return err
+	}
+
+	csvFile, err := createCSV(products)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(csvFile.Name())
+
+	zipFile, err := createZipFromCSV(csvFile)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(zipFile.Name())
+
+	return serveZipFile(w, r, zipFile)
+}
+
+// Обрабатывает скачивание отфильтрованных данных
+func ProcessFilteredDownload(w http.ResponseWriter, r *http.Request) error {
+	// Получаем и валидируем параметры
+	start := r.URL.Query().Get("start")
+	end := r.URL.Query().Get("end")
+	minStr := r.URL.Query().Get("min")
+	maxStr := r.URL.Query().Get("max")
+
+	// Проверяем формат дат
+	if _, err := time.Parse("2006-01-02", start); err != nil {
+		return fmt.Errorf("неверный формат начальной даты: %w", err)
+	}
+	if _, err := time.Parse("2006-01-02", end); err != nil {
+		return fmt.Errorf("неверный формат конечной даты: %w", err)
+	}
+
+	// Парсим min и max
+	min, err := strconv.ParseInt(minStr, 10, 64)
+	if err != nil || min <= 0 {
+		return errors.New("неверное значение минимальной цены")
+	}
+
+	max, err := strconv.ParseInt(maxStr, 10, 64)
+	if err != nil || max <= 0 {
+		return errors.New("неверное значение максимальной цены")
+	}
+
+	if min > max {
+		return errors.New("минимальная цена не может быть больше максимальной")
+	}
+
+	// Преобразуем в float64 для запроса к БД
+	minPrice := float64(min)
+	maxPrice := float64(max)
+
+	// Получаем отфильтрованные данные
+	products, err := repository.FetchFilteredData(start, end, minPrice, maxPrice)
+	if err != nil {
+		return fmt.Errorf("ошибка получения данных: %w", err)
+	}
+
+	// Создаем CSV файл
+	csvFile, err := createCSV(products)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(csvFile.Name())
+
+	// Создаем ZIP архив
+	zipFile, err := createZipFromCSV(csvFile)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(zipFile.Name())
+
+	// Отправляем файл клиенту
+	return serveZipFile(w, r, zipFile)
 }
 
 // Получает загруженный файл из запроса
@@ -41,59 +131,12 @@ func getUploadedFile(r *http.Request) (multipart.File, error) {
 	return file, nil
 }
 
-// Сохраняет временный файл
-func saveTempFile(file multipart.File, archiveType types.ArchiveType) (*os.File, error) {
-	ext := ".zip"
-	if archiveType == types.Tar {
-		ext = ".tar"
-	}
-
-	tempFile, err := os.CreateTemp("", "upload-*"+ext)
-	if err != nil {
-		return nil, errors.New("не удалось создать временный файл")
-	}
-
-	if _, err := io.Copy(tempFile, file); err != nil {
-		return nil, errors.New("не удалось сохранить файл")
-	}
-
-	return tempFile, nil
-}
-
 // Обрабатывает архив в зависимости от типа
 func processArchive(filename string, archiveType types.ArchiveType) (types.GetPricesResponse, error) {
 	if archiveType == types.Tar {
 		return repository.ProcessTar(filename)
 	}
 	return repository.ProcessZip(filename)
-}
-
-// Обрабатывает скачивание данных
-func ProcessDownload(w http.ResponseWriter, r *http.Request) error {
-	products, err := fetchProducts()
-	if err != nil {
-		return err
-	}
-
-	tempCsvFile, err := createTempCSV(products)
-	if err != nil {
-		return err
-	}
-	defer cleanupFile(tempCsvFile)
-
-	zipFile, err := createZipFromCSV(tempCsvFile)
-	if err != nil {
-		return err
-	}
-	defer cleanupFile(zipFile)
-
-	return serveZipFile(w, r, zipFile)
-}
-
-// Очищает временный файл
-func cleanupFile(file *os.File) {
-	file.Close()
-	os.Remove(file.Name())
 }
 
 // Получает данные из репозитория
@@ -105,18 +148,18 @@ func fetchProducts() ([]types.Product, error) {
 	return products, nil
 }
 
-// Создает временный CSV-файл с данными
-func createTempCSV(products []types.Product) (*os.File, error) {
-	tempCsvFile, err := os.CreateTemp("", "data-*.csv")
+// Создает CSV-файл с данными
+func createCSV(products []types.Product) (*os.File, error) {
+	csvFile, err := os.Create("data.csv")
 	if err != nil {
-		return nil, fmt.Errorf("не удалось создать временный файл: %w", err)
+		return nil, fmt.Errorf("не удалось создать CSV файл: %w", err)
 	}
 
-	if err := writeProductsToCSV(tempCsvFile, products); err != nil {
+	if err := writeProductsToCSV(csvFile, products); err != nil {
 		return nil, err
 	}
 
-	return tempCsvFile, nil
+	return csvFile, nil
 }
 
 // Записывает продукты в CSV
@@ -126,7 +169,7 @@ func writeProductsToCSV(file *os.File, products []types.Product) error {
 
 	for _, product := range products {
 		record := []string{
-			strconv.Itoa(product.ProductId),
+			strconv.Itoa(product.Id),
 			product.Name,
 			product.Category,
 			strconv.FormatFloat(product.Price, 'f', 2, 64),
@@ -182,92 +225,4 @@ func serveZipFile(w http.ResponseWriter, r *http.Request, zipFile *os.File) erro
 	w.Header().Set("Content-Disposition", "attachment; filename=data.zip")
 	http.ServeFile(w, r, zipFile.Name())
 	return nil
-}
-
-func ProcessCSVFile(filename string) (types.GetPricesResponse, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return types.GetPricesResponse{}, fmt.Errorf("не удалось открыть файл: %w", err)
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return types.GetPricesResponse{}, fmt.Errorf("ошибка чтения CSV: %w", err)
-	}
-
-	// Пропускаем заголовки при обработке
-	for i := 1; i < len(records); i++ {
-		product, err := repository.MapRecordToProduct(records[i])
-		if err != nil {
-			return types.GetPricesResponse{}, fmt.Errorf("ошибка обработки записи %d: %w", i, err)
-		}
-
-		if err := repository.InsertProductIntoDB(product); err != nil {
-			return types.GetPricesResponse{}, fmt.Errorf("ошибка вставки в БД: %w", err)
-		}
-	}
-
-	// Передаем все records для подсчета статистики
-	return repository.GetStatistics(records)
-}
-
-// Обрабатывает скачивание отфильтрованных данных
-func ProcessFilteredDownload(w http.ResponseWriter, r *http.Request) error {
-	// Получаем и валидируем параметры
-	start := r.URL.Query().Get("start")
-	end := r.URL.Query().Get("end")
-	minStr := r.URL.Query().Get("min")
-	maxStr := r.URL.Query().Get("max")
-
-	// Проверяем формат дат
-	if _, err := time.Parse("2006-01-02", start); err != nil {
-		return fmt.Errorf("неверный формат начальной даты: %w", err)
-	}
-	if _, err := time.Parse("2006-01-02", end); err != nil {
-		return fmt.Errorf("неверный формат конечной даты: %w", err)
-	}
-
-	// Парсим min и max
-	min, err := strconv.ParseInt(minStr, 10, 64)
-	if err != nil || min <= 0 {
-		return errors.New("неверное значение минимальной цены")
-	}
-
-	max, err := strconv.ParseInt(maxStr, 10, 64)
-	if err != nil || max <= 0 {
-		return errors.New("неверное значение максимальной цены")
-	}
-
-	if min > max {
-		return errors.New("минимальная цена не может быть больше максимальной")
-	}
-
-	// Преобразуем в float64 для запроса к БД
-	minPrice := float64(min)
-	maxPrice := float64(max)
-
-	// Получаем отфильтрованные данные
-	products, err := repository.FetchFilteredData(start, end, minPrice, maxPrice)
-	if err != nil {
-		return fmt.Errorf("ошибка получения данных: %w", err)
-	}
-
-	// Создаем временный CSV файл
-	tempCsvFile, err := createTempCSV(products)
-	if err != nil {
-		return err
-	}
-	defer cleanupFile(tempCsvFile)
-
-	// Создаем ZIP архив
-	zipFile, err := createZipFromCSV(tempCsvFile)
-	if err != nil {
-		return err
-	}
-	defer cleanupFile(zipFile)
-
-	// Отправляем файл клиенту
-	return serveZipFile(w, r, zipFile)
 }

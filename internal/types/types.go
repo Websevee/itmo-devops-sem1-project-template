@@ -9,7 +9,6 @@ const (
 
 type Product struct {
 	Id        int
-	ProductId int
 	CreatedAt string
 	Name      string
 	Category  string
